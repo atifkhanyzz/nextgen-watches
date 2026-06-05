@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+!.env.example
+
+.vscode/
+cookies.txt
+npm-debug.log
+.DS_Store
+temp_productView.html

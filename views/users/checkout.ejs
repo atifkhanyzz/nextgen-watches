@@ -1,0 +1,133 @@
+<%- include('./layouts/header2.ejs') %>
+
+<div class="site-wrap bg0">
+    <div class="bg-light py-3">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-12 mb-0">
+                    <a href="/">Home</a> <span class="mx-2 mb-0">/</span>
+                    <a href="/cart">Cart</a> <span class="mx-2 mb-0">/</span>
+                    <strong class="text-black">Checkout</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="site-section" style="padding-top: 40px">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6 mb-5 mb-md-0">
+                    <h2 class="h3 mb-3 text-black">Shipping Details</h2>
+                    <p class="text-muted">Choose one saved address for manual order processing.</p>
+
+                    <div class="row">
+                        <% if (address && address.address && address.address.length > 0) { %>
+                            <% for (let i = 0; i < address.address.length; i++) { %>
+                                <div class="col-md-6 col-12 mb-3 mt-3 address-options" id="address-card-<%= address.address[i].id %>">
+                                    <div class="card p-2" style="background: #f3f3f9; border-radius: 10px">
+                                        <div class="card-body">
+                                            <h6 class="card-title" style="font-size: 15px">Name: <%= address.address[i].fullName %></h6>
+                                            <p class="card-text">Number: <%= address.address[i].mobile %></p>
+                                            <p class="card-text">District: <%= address.address[i].district %></p>
+                                            <p class="card-text">City: <%= address.address[i].city %></p>
+                                            <p class="card-text">State: <%= address.address[i].state %></p>
+                                            <p class="card-text">Pincode: <%= address.address[i].pincode %></p>
+                                        </div>
+                                        <input type="radio" type="radio" name="addressId" value="<%= address.address[i].id %>" <%= i === 0 ? 'checked' : '' %> />
+                                    </div>
+                                </div>
+                            <% } %>
+                        <% } else { %>
+                            <div class="col-12">
+                                <div class="alert alert-warning">No address found. Please add a shipping address before placing your order.</div>
+                            </div>
+                        <% } %>
+                    </div>
+
+                    <div>
+                        <a href="/checkoutAddress">
+                            <button id="addAddressButton" class="btn btn-primary btn-sm">Add Address</button>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="row mb-5">
+                        <div class="col-md-12">
+                            <h2 class="h3 mb-3 text-black">Your Order</h2>
+                            <div class="p-3 p-lg-5 border">
+                                <table class="table site-block-order-table mb-5">
+                                    <thead>
+                                        <th>Product</th>
+                                        <th>Total</th>
+                                    </thead>
+                                    <tbody>
+                                        <% if (cart && cart.items && cart.items.length > 0) { %>
+                                            <% cart.items.forEach(function(item) { %>
+                                                <tr>
+                                                    <td><%= item.product && item.product.productName ? item.product.productName : (item.productId && item.productId.productName ? item.productId.productName : 'Product') %> <strong class="mx-2">x</strong> <%= item.quantity %></td>
+                                                    <td>$<%= (Number(item.product && item.product.discountedPrice || (item.productId && item.productId.discountedPrice) || 0) * Number(item.quantity || 0)).toFixed(2) %></td>
+                                                </tr>
+                                            <% }) %>
+                                        <% } %>
+                                        <tr>
+                                            <td class="text-black font-weight-bold"><strong>Order Total</strong></td>
+                                            <td class="text-black font-weight-bold"><strong>$<%= cart ? Number(cart.subTotal || 0).toFixed(2) : '0.00' %></strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+
+                                <div class="border p-3 mb-3 bg-light">
+                                    <p class="mb-0 text-black"><strong>Manual Order Processing</strong></p>
+                                    <p class="mb-0 text-muted">No online payment is required. Your order will be placed and managed by the store admin.</p>
+                                </div>
+
+                                <button class="btn btn-primary btn-lg btn-block" id="placeOrderBtn">Place Order</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const addAddressButton = document.getElementById('addAddressButton');
+    if (addAddressButton) {
+        addAddressButton.addEventListener('click', function (event) {
+            event.preventDefault();
+            window.location.href = '/checkoutAddress';
+        });
+    }
+
+    const placeOrderBtn = document.getElementById('placeOrderBtn');
+    if (placeOrderBtn) {
+        placeOrderBtn.addEventListener('click', async function () {
+            const selectedAddress = document.querySelector('input[name="addressId"]:checked');
+            if (!selectedAddress || !selectedAddress.value) {
+                Swal.fire('Please select a shipping address');
+                return;
+            }
+
+            try {
+                const response = await fetch('/placeOrder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ addressId: selectedAddress.value })
+                });
+
+                const responseData = await response.json();
+                if (response.ok) {
+                    window.location.href = '/thankyou';
+                } else {
+                    Swal.fire(responseData.error || responseData.message || 'Unable to place order', '', 'error');
+                }
+            } catch (error) {
+                Swal.fire('Unexpected error while placing order', '', 'error');
+            }
+        });
+    }
+</script>
+
+<%- include('./layouts/footer.ejs') %>
