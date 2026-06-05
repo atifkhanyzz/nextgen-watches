@@ -18,62 +18,111 @@ const securePassword = async (password) => {
 };
 
 const otpSent = async (email, otp) => {
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        console.error('SMTP credentials missing');
+        console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
+        console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
+        return false;
+    }
+
+    console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
+    console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
+
     try {
         const transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
-            requireTLS: true,
+            port: 465,
+            secure: true,
             auth: {
                 user: process.env.SMTP_USER,
                 pass: process.env.SMTP_PASS,
             },
+            connectionTimeout: 20000,
+            greetingTimeout: 20000,
+            socketTimeout: 20000,
         });
 
         const mailOptions = {
             from: process.env.SMTP_USER,
             to: email,
-            subject: 'Verify Your Email',
+            subject: 'Your OTP Verification Code',
             html: `<p>Your OTP is: <strong>${otp}</strong></p>`,
         };
 
-        await transporter.sendMail(mailOptions);
+        try {
+            const info = await transporter.sendMail(mailOptions);
+            console.log('OTP email sent successfully:', info && info.messageId);
+            return true;
+        } catch (error) {
+            console.error('OTP email sending failed:', {
+                message: error && error.message,
+                code: error && error.code,
+                command: error && error.command,
+            });
+            return false;
+        }
     } catch (error) {
-        console.log(error.message);
+        console.error('Failed to create transporter or send OTP:', {
+            message: error && error.message,
+            code: error && error.code,
+            command: error && error.command,
+        });
+        return false;
     }
 };
 
 //for sending recovery mail
 const resetPasswordMail = async (username, email, token) => {
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        console.error('SMTP credentials missing');
+        console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
+        console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
+        return false;
+    }
+
+    console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
+    console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
+
     try {
         const transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
-            requireTLS: true,
+            port: 465,
+            secure: true,
             auth: {
                 user: process.env.SMTP_USER,
                 pass: process.env.SMTP_PASS,
-            }
-        })
+            },
+            connectionTimeout: 20000,
+            greetingTimeout: 20000,
+            socketTimeout: 20000,
+        });
 
         const mailOptions = {
             from: process.env.SMTP_USER,
             to: email,
-            subject: "For Reset Password",
-            html: `<p> Hi, ${username}, please click here to <a href="http://localhost:5000/forgotPassword?token=${token}"> Reset </a> your password</p>`
+            subject: 'For Reset Password',
+            html: `<p> Hi, ${username}, please click here to <a href="http://localhost:5000/forgotPassword?token=${token}"> Reset </a> your password</p>`,
+        };
+
+        try {
+            const info = await transporter.sendMail(mailOptions);
+            console.log('Password reset email sent:', info && info.messageId);
+            return true;
+        } catch (error) {
+            console.error('Password reset email sending failed:', {
+                message: error && error.message,
+                code: error && error.code,
+                command: error && error.command,
+            });
+            return false;
         }
-
-        transporter.sendMail(mailOptions, function (error, info) {
-            if (error) {
-                next(error);
-            } else {
-                console.log("Email Has been Sent:-", info, response);
-            }
-        })
-
     } catch (error) {
-        next(error);
+        console.error('Failed to create transporter for password reset:', {
+            message: error && error.message,
+            code: error && error.code,
+            command: error && error.command,
+        });
+        return false;
     }
 };
 
@@ -145,7 +194,10 @@ module.exports = {
                 if (userData.isVerified === false) return res.render('forgetPassword', { message: 'Please verify your mail' });
                 const randomString = randomstring.generate();
                 await User._Model.update({ token: randomString }, { where: { email } });
-                resetPasswordMail(userData.firstName, userData.email, randomString);
+                {
+                    const sent = await resetPasswordMail(userData.firstName, userData.email, randomString);
+                    if (!sent) return res.render('forgetPassword', { message: 'Password reset email could not be sent. Please try again.' });
+                }
                 return res.render('forgetPassword', { message: 'Please Check Your Mail to Reset Your Password' });
             }
             return res.render('forgetPassword', { message: 'User email is Incorrect' });
@@ -238,7 +290,10 @@ module.exports = {
                     if (password === passwordConfirm) {
 
                         const resultRow = await User._Model.create({ firstName, lastName, email, mobileno, password: hashedPassword });
-                        otpSent(email, req.session.otp.code);
+                        const sent = await otpSent(email, req.session.otp.code);
+                        if (!sent) {
+                            return res.render('registration', { message: 'OTP email could not be sent. Please try again.' });
+                        }
                         res.json({ success: true, message: 'User registered successfully' });
                     } else {
                         res.json({ success: false, message: "Password doesn't match" });
@@ -353,7 +408,10 @@ module.exports = {
             req.session.otp.code = newOTP;
             const currentTime = new Date();
             req.session.otp.creationTime = currentTime.getMinutes()
-            otpSent(req.session.email, req.session.otp.code);
+            {
+                const sent = await otpSent(req.session.email, req.session.otp.code);
+                if (!sent) return res.render('otp', { message: 'OTP email could not be sent. Please try again.' });
+            }
 
             res.render("otp", { message: "OTP resent successfully" });
         } catch (error) {
