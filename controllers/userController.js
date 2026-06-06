@@ -3,6 +3,7 @@ const User = require('../models/userModel');
 const Product = require('../models/productModel');
 const Category = require('../models/categoryModel');
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const bcrypt = require('bcryptjs');
 const otpGenerator = require("otp-generator");
 const randomstring = require('randomstring');
@@ -29,129 +30,83 @@ function isTrueValue(value) {
 }
 
 const otpSent = async (email, otp) => {
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        console.error('SMTP credentials missing');
-        console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
-        console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
-        // In development, allow a local transport so tests can proceed without real SMTP
-        if (process.env.NODE_ENV !== 'production') {
-            console.log('Running in development: using jsonTransport for OTP email (no external SMTP)');
-            try {
-                const transporter = nodemailer.createTransport({ jsonTransport: true });
-                const mailOptions = {
-                    from: process.env.SMTP_USER || 'dev@example.com',
-                    to: email,
-                    subject: 'Your OTP Verification Code',
-                    html: `<p>Your OTP is: <strong>${otp}</strong></p>`,
-                };
-                const info = await transporter.sendMail(mailOptions);
-                console.log('OTP email (dev) prepared:', info && info.messageId);
-                return true;
-            } catch (err) {
-                console.error('Dev OTP transport failed:', err && err.message);
-                return false;
-            }
+    // In production, use Resend. In non-production, fall back to nodemailer jsonTransport.
+    if (process.env.NODE_ENV === 'production') {
+        if (!process.env.RESEND_API_KEY) {
+            console.error('RESEND_API_KEY missing');
+            return false;
         }
-        return false;
+        try {
+            const resendClient = new Resend(process.env.RESEND_API_KEY);
+            await resendClient.emails.send({
+                from: process.env.EMAIL_FROM || 'onboarding@resend.dev',
+                to: email,
+                subject: 'Your OTP Verification Code',
+                html: `<p>Your OTP code is <strong>${otp}</strong></p>`,
+            });
+            console.log('OTP email sent via Resend');
+            return true;
+        } catch (err) {
+            console.error('Resend OTP sending failed:', err && err.message ? err.message : err);
+            return false;
+        }
     }
 
-    console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
-    console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
-
+    // Development fallback: jsonTransport so local/dev testing doesn't require real SMTP
     try {
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            auth: {
-                user: process.env.SMTP_USER,
-                pass: process.env.SMTP_PASS,
-            },
-            connectionTimeout: 20000,
-            greetingTimeout: 20000,
-            socketTimeout: 20000,
-        });
-
+        const transporter = nodemailer.createTransport({ jsonTransport: true });
         const mailOptions = {
-            from: process.env.SMTP_USER,
+            from: process.env.EMAIL_FROM || process.env.SMTP_USER || 'dev@example.com',
             to: email,
             subject: 'Your OTP Verification Code',
             html: `<p>Your OTP is: <strong>${otp}</strong></p>`,
         };
-
-        try {
-            const info = await transporter.sendMail(mailOptions);
-            console.log('OTP email sent successfully:', info && info.messageId);
-            return true;
-        } catch (error) {
-            console.error('OTP email sending failed:', {
-                message: error && error.message,
-                code: error && error.code,
-                command: error && error.command,
-            });
-            return false;
-        }
-    } catch (error) {
-        console.error('Failed to create transporter or send OTP:', {
-            message: error && error.message,
-            code: error && error.code,
-            command: error && error.command,
-        });
+        const info = await transporter.sendMail(mailOptions);
+        console.log('OTP email (dev) prepared:', info && info.messageId);
+        return true;
+    } catch (err) {
+        console.error('Dev OTP transport failed:', err && err.message ? err.message : err);
         return false;
     }
 };
 
 //for sending recovery mail
 const resetPasswordMail = async (username, email, token) => {
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        console.error('SMTP credentials missing');
-        console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
-        console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
-        return false;
-    }
-
-    console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
-    console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
-
-    try {
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            auth: {
-                user: process.env.SMTP_USER,
-                pass: process.env.SMTP_PASS,
-            },
-            connectionTimeout: 20000,
-            greetingTimeout: 20000,
-            socketTimeout: 20000,
-        });
-
-        const mailOptions = {
-            from: process.env.SMTP_USER,
-            to: email,
-            subject: 'For Reset Password',
-            html: `<p> Hi, ${username}, please click here to <a href="http://localhost:5000/forgotPassword?token=${token}"> Reset </a> your password</p>`,
-        };
-
-        try {
-            const info = await transporter.sendMail(mailOptions);
-            console.log('Password reset email sent:', info && info.messageId);
-            return true;
-        } catch (error) {
-            console.error('Password reset email sending failed:', {
-                message: error && error.message,
-                code: error && error.code,
-                command: error && error.command,
-            });
+    if (process.env.NODE_ENV === 'production') {
+        if (!process.env.RESEND_API_KEY) {
+            console.error('RESEND_API_KEY missing');
             return false;
         }
-    } catch (error) {
-        console.error('Failed to create transporter for password reset:', {
-            message: error && error.message,
-            code: error && error.code,
-            command: error && error.command,
-        });
+        try {
+            const resendClient = new Resend(process.env.RESEND_API_KEY);
+            await resendClient.emails.send({
+                from: process.env.EMAIL_FROM || 'onboarding@resend.dev',
+                to: email,
+                subject: 'For Reset Password',
+                html: `<p> Hi, ${username}, please click here to <a href="${process.env.SITE_URL || 'http://localhost:3000'}/forgotPassword?token=${token}"> Reset </a> your password</p>`,
+            });
+            console.log('Password reset email sent via Resend');
+            return true;
+        } catch (err) {
+            console.error('Resend password reset failed:', err && err.message ? err.message : err);
+            return false;
+        }
+    }
+
+    // Development fallback
+    try {
+        const transporter = nodemailer.createTransport({ jsonTransport: true });
+        const mailOptions = {
+            from: process.env.EMAIL_FROM || process.env.SMTP_USER || 'dev@example.com',
+            to: email,
+            subject: 'For Reset Password',
+            html: `<p> Hi, ${username}, please click here to <a href="${process.env.SITE_URL || 'http://localhost:3000'}/forgotPassword?token=${token}"> Reset </a> your password</p>`,
+        };
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Password reset email (dev) prepared:', info && info.messageId);
+        return true;
+    } catch (err) {
+        console.error('Dev password reset transport failed:', err && err.message ? err.message : err);
         return false;
     }
 };
