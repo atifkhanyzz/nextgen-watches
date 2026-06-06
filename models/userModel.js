@@ -11,6 +11,8 @@ const UserModel = sequelize.define('User', {
   password: { type: DataTypes.STRING, allowNull: false },
   isVerified: { type: DataTypes.BOOLEAN, defaultValue: false },
   isBlocked: { type: DataTypes.BOOLEAN, defaultValue: false },
+  isDeleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
   token: { type: DataTypes.STRING, defaultValue: '' },
   referalCode: { type: DataTypes.STRING }
 }, {

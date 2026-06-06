@@ -17,11 +17,35 @@ const securePassword = async (password) => {
     }
 };
 
+// Normalizer for boolean-like values stored in DB
+function isTrueValue(value) {
+    return value === true || value === 1 || value === '1' || value === 'true';
+}
+
 const otpSent = async (email, otp) => {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
         console.error('SMTP credentials missing');
         console.log('SMTP_USER exists:', !!process.env.SMTP_USER);
         console.log('SMTP_PASS exists:', !!process.env.SMTP_PASS);
+        // In development, allow a local transport so tests can proceed without real SMTP
+        if (process.env.NODE_ENV !== 'production') {
+            console.log('Running in development: using jsonTransport for OTP email (no external SMTP)');
+            try {
+                const transporter = nodemailer.createTransport({ jsonTransport: true });
+                const mailOptions = {
+                    from: process.env.SMTP_USER || 'dev@example.com',
+                    to: email,
+                    subject: 'Your OTP Verification Code',
+                    html: `<p>Your OTP is: <strong>${otp}</strong></p>`,
+                };
+                const info = await transporter.sendMail(mailOptions);
+                console.log('OTP email (dev) prepared:', info && info.messageId);
+                return true;
+            } catch (err) {
+                console.error('Dev OTP transport failed:', err && err.message);
+                return false;
+            }
+        }
         return false;
     }
 
@@ -151,6 +175,7 @@ module.exports = {
         const userRow = await User._Model.findOne({ where: { email } });
         const user = userRow && userRow.get ? userRow.get({ plain: true }) : null;
         if (!user) return res.status(404).json({ error: 'User not found' });
+        if (user.isDeleted) return res.status(401).json({ error: 'This account has been removed. Please contact support.' });
         const isPasswordValid = await bcrypt.compare(password, user.password);
 
         if (!isPasswordValid) {
@@ -244,7 +269,9 @@ module.exports = {
 
     loadRegister: async (req, res, next) => {
         try {
-            res.render('registration');
+            // Pass through any message sent via query (e.g. redirect from /otp)
+            const message = req.query && req.query.message ? req.query.message : undefined;
+            res.render('registration', { message });
         } catch (error) {
             next(error);
         }
@@ -261,6 +288,12 @@ module.exports = {
 
     loadOtp: async (req, res, next) => {
         try {
+            // Only render OTP page if there's a pending user in session
+            const pendingEmail = req.session.pendingUserEmail;
+            const pendingId = req.session.pendingUserId;
+            if (!pendingEmail && !pendingId) {
+                return res.redirect('/register?message=' + encodeURIComponent('Please complete signup first'));
+            }
             res.render('otp');
         } catch (error) {
             next(error);
@@ -269,39 +302,72 @@ module.exports = {
 
     insertUser: async (req, res, next) => {
         try {
+            const { passwordConfirm, password, mobileno, email, lastName, firstName } = req.body;
+
+            console.log('REGISTER ROUTE HIT');
+            console.log('Signup email:', email);
+
+            if (!firstName || !lastName || !email || !mobileno || !password || !passwordConfirm) {
+                return res.json({ success: false, message: 'Please enter all details' });
+            }
+
+            if (password !== passwordConfirm) return res.json({ success: false, message: "Password doesn't match" });
+
+            const existingUserRow = await User._Model.findOne({ where: { email } });
+            const existingUser = existingUserRow ? existingUserRow.get({ plain: true }) : null;
+            console.log('Existing user found:', !!existingUser);
+            console.log('Raw isVerified:', existingUser ? existingUser.isVerified : null);
+
+            const existingUserVerified = existingUser ? isTrueValue(existingUser.isVerified) : false;
+            console.log('Normalized existingUserVerified:', existingUserVerified);
+
+            if (existingUser && existingUserVerified) {
+                console.log('Existing verified user found, blocking signup for', email);
+                return res.json({ success: false, message: 'User already exists' });
+            }
+
+            // Generate OTP
             const otp = otpGenerator.generate(6, { upperCase: false, specialChars: false });
-            const currentTime = new Date();
-            const otpCreationTime = currentTime.getMinutes()
-            req.session.otp = {
-                code: otp,
-                creationTime: otpCreationTime,
-            };
 
-            const { passwordConfirm, password, mobileno, email, lastName, firstName } = req.body
-            req.session.email = email
-            const userCheckRow = await User._Model.findOne({ where: { email } });
-            if (userCheckRow) return res.json({ success: false, message: 'Email already exists' });
+            // Attempt to send OTP first
+            const sent = await otpSent(email, otp);
+            if (!sent) {
+                console.error('OTP email sending failed for', email);
+                return res.json({ success: false, message: 'OTP email could not be sent. Please try again.' });
+            }
 
-            // else continue
-            
-                const hashedPassword = await securePassword(password);
+            console.log('OTP email sent successfully');
+            if (process.env.NODE_ENV !== 'production') console.log('OTP (dev only):', otp);
 
-                if (firstName && email && lastName && mobileno) {
-                    if (password === passwordConfirm) {
+            // Email sent. Now create or update unverified user record
+            const hashedPassword = await securePassword(password);
 
-                        const resultRow = await User._Model.create({ firstName, lastName, email, mobileno, password: hashedPassword });
-                        const sent = await otpSent(email, req.session.otp.code);
-                        if (!sent) {
-                            return res.render('registration', { message: 'OTP email could not be sent. Please try again.' });
-                        }
-                        res.json({ success: true, message: 'User registered successfully' });
-                    } else {
-                        res.json({ success: false, message: "Password doesn't match" });
-                    }
-                } else {
-                    res.json({ success: false, message: "Please enter all details" });
-                }
-            
+            let userRecord;
+            if (existingUser) {
+                // existing user is unverified — reuse/update
+                console.log('Resending OTP for unverified user');
+                await User._Model.update({ firstName, lastName, mobileno, password: hashedPassword, isDeleted: false, deletedAt: null }, { where: { email } });
+                userRecord = await User._Model.findOne({ where: { email } });
+            } else {
+                userRecord = await User._Model.create({ firstName, lastName, email, mobileno, password: hashedPassword, isDeleted: false, deletedAt: null });
+            }
+
+            const userPlain = userRecord.get({ plain: true });
+
+            // Store pending user info in session AFTER successful send and DB update
+            req.session.otp = otp;
+            req.session.otpExpires = Date.now() + (5 * 60 * 1000);
+            req.session.pendingUserEmail = email;
+            req.session.pendingUserId = userPlain.id;
+
+            // Save session and respond so frontend can redirect to /otp
+            req.session.save(() => {
+                console.log('User saved as unverified:', userPlain.id);
+                console.log('Session pendingUserId:', req.session.pendingUserId);
+                console.log('Returning redirectUrl /otp');
+                return res.json({ success: true, redirectUrl: '/otp', message: 'OTP sent successfully' });
+            });
+
         } catch (error) {
             next(error);
         }
@@ -378,24 +444,40 @@ module.exports = {
     verifyOTP: async (req, res, next) => {
         try {
             const enteredOTP = req.body.otp;
-            const storedOTP = req.session.otp.code;
-            const otpCreationTime = req.session.otp.creationTime;
-            const email = req.session.email
+            const storedOTP = req.session.otp;
+            const otpExpires = req.session.otpExpires;
+            const pendingEmail = req.session.pendingUserEmail;
+            const pendingId = req.session.pendingUserId;
 
-            const currentTimeFull = new Date();
-            const currentTime = currentTimeFull.getMinutes()
+            if (!storedOTP || !otpExpires || !pendingEmail && !pendingId) {
+                return res.redirect('/register?message=' + encodeURIComponent('No pending verification found'));
+            }
 
-            const timeDiff = (currentTime - otpCreationTime);
+            if (Date.now() > otpExpires) {
+                return res.render('otp', { message: 'OTP has expired. Please resend.' });
+            }
 
-            if (enteredOTP === storedOTP && timeDiff <= 1) {
-                    const userRow = await User._Model.findOne({ where: { email } });
-                    if (userRow) {
-                        await userRow.update({ isVerified: true });
-                        return res.render('login', { message: 'Registration successful' });
-                    }
-                    return res.render('otp', { message: 'User not found' });
+            if (enteredOTP === String(storedOTP)) {
+                // Find pending user
+                let userRow = null;
+                if (pendingId) userRow = await User._Model.findOne({ where: { id: pendingId } });
+                if (!userRow && pendingEmail) userRow = await User._Model.findOne({ where: { email: pendingEmail } });
+
+                if (userRow) {
+                    await userRow.update({ isVerified: true });
+
+                    // Clear session OTP data
+                    delete req.session.otp;
+                    delete req.session.otpExpires;
+                    delete req.session.pendingUserEmail;
+                    delete req.session.pendingUserId;
+
+                    return res.render('login', { message: 'Registration successful' });
+                }
+
+                return res.render('otp', { message: 'User not found' });
             } else {
-                res.render('otp', { message: "Invalid OTP or OTP has expired" });
+                return res.render('otp', { message: 'Invalid OTP or OTP has expired' });
             }
         } catch (error) {
             next(error);
@@ -404,16 +486,18 @@ module.exports = {
 
     resendOTP: async (req, res, next) => {
         try {
-            const newOTP = otpGenerator.generate(6, { upperCase: false, specialChars: false });
-            req.session.otp.code = newOTP;
-            const currentTime = new Date();
-            req.session.otp.creationTime = currentTime.getMinutes()
-            {
-                const sent = await otpSent(req.session.email, req.session.otp.code);
-                if (!sent) return res.render('otp', { message: 'OTP email could not be sent. Please try again.' });
-            }
+            const pendingEmail = req.session.pendingUserEmail;
+            const pendingId = req.session.pendingUserId;
+            if (!pendingEmail && !pendingId) return res.redirect('/register?message=' + encodeURIComponent('No pending verification found'));
 
-            res.render("otp", { message: "OTP resent successfully" });
+            const newOTP = otpGenerator.generate(6, { upperCase: false, specialChars: false });
+            req.session.otp = newOTP;
+            req.session.otpExpires = Date.now() + (5 * 60 * 1000);
+
+            const sent = await otpSent(pendingEmail, newOTP);
+            if (!sent) return res.render('otp', { message: 'OTP email could not be sent. Please try again.' });
+
+            return res.render('otp', { message: 'OTP resent successfully' });
         } catch (error) {
             next(error);
         }

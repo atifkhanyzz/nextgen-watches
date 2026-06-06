@@ -5,6 +5,8 @@ const path = require('path');
 dotenv.config();
 
 const sequelize = require('./db');
+const { DataTypes } = require('sequelize');
+const User = require('./models/userModel');
 
 const app = express();
 
@@ -75,6 +77,25 @@ app.use((err, req, res, next) => {
 async function startServer() {
   try {
     await sequelize.authenticate();
+
+    // Ensure soft-delete columns exist on User table (safe migration)
+    try {
+      const queryInterface = sequelize.getQueryInterface();
+      const tableName = User._Model.getTableName();
+      const tableDesc = await queryInterface.describeTable(tableName);
+
+      if (!tableDesc.isDeleted) {
+        console.log(`Adding missing column isDeleted to table ${tableName}`);
+        await queryInterface.addColumn(tableName, 'isDeleted', { type: DataTypes.BOOLEAN, allowNull: true, defaultValue: false });
+      }
+      if (!tableDesc.deletedAt) {
+        console.log(`Adding missing column deletedAt to table ${tableName}`);
+        await queryInterface.addColumn(tableName, 'deletedAt', { type: DataTypes.DATE, allowNull: true });
+      }
+    } catch (mErr) {
+      console.warn('Soft-delete migration check failed:', mErr && mErr.message);
+    }
+
     await sequelize.sync();
 
     global.__DB_CONNECTED = true;

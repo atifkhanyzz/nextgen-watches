@@ -23,7 +23,16 @@ function ensureArrayField(field) {
     if (!field) return [];
     if (typeof field === 'string') {
         try {
-            const parsed = JSON.parse(field);
+            let parsed = JSON.parse(field);
+            // Handle double-serialized JSON strings like '"[\"...\"]"'
+            if (typeof parsed === 'string') {
+                try {
+                    const parsed2 = JSON.parse(parsed);
+                    parsed = parsed2;
+                } catch (e) {
+                    // keep parsed as string
+                }
+            }
             return Array.isArray(parsed) ? parsed : [parsed];
         } catch (e) {
             return [field];
@@ -355,8 +364,12 @@ module.exports = {
             }
 
             const uploadedImages = await getProductImages(req);
-            const productImage = uploadedImages.length > 0 ? uploadedImages : product.productImage;
 
+            // Defensive logging for debugging image overwrite issues
+            console.log('Existing product images before update:', product.productImage);
+            console.log('New files uploaded count:', uploadedImages.length);
+
+            // Parse numeric fields and calculate discounts first
             const price = Number(productPrice);
             const stock = Number(productStock);
             const offer = Number(productOfferPercentage) || 0;
@@ -367,7 +380,8 @@ module.exports = {
                 selectedCategory.categoryOfferPercentage
             );
 
-            await Product._Model.update({
+            // Build update payload and only include productImage if new images were uploaded.
+            const updatePayload = {
                 productName: productName.trim(),
                 productDescription: productDescription.trim(),
                 productCategory,
@@ -376,9 +390,23 @@ module.exports = {
                 productBrand: productBrand.trim(),
                 productOfferPercentage: offer,
                 highestOfferPercentage: discountData.highestOfferPercentage,
-                discountedPrice: discountData.discountedPrice,
-                productImage
-            }, { where: { id } });
+                discountedPrice: discountData.discountedPrice
+            };
+
+            if (uploadedImages && uploadedImages.length > 0) {
+                updatePayload.productImage = uploadedImages;
+            }
+
+            await Product._Model.update(updatePayload, { where: { id } });
+
+            // Re-fetch product from DB to confirm what was saved
+            try {
+                const refreshed = await Product._Model.findByPk(id);
+                const refreshedPlain = refreshed && refreshed.get ? refreshed.get({ plain: true }) : null;
+                console.log('Product after update (db):', refreshedPlain && JSON.stringify(refreshedPlain.productImage));
+            } catch (err) {
+                console.error('Error re-fetching product after update:', err);
+            }
 
             res.redirect('/admin/viewProduct');
         } catch (error) {

@@ -24,7 +24,7 @@
 								</div> -->
 							</div>
 							<form id="registration-form" class="signin-form"
-								onsubmit="return validateForm() && submitForm(event)">
+								onsubmit="event.preventDefault(); if (validateForm()) submitForm(event);">
 								<!-- <form id="registration-form" action="/register" class="signin-form" method="post"
 								onsubmit="return validateForm()"> -->
 								<div class="form-group mt-3">
@@ -107,45 +107,61 @@
 				// Get form data
 				const formData = new FormData(document.getElementById('registration-form'));
 				if (formData) {
+					const submitButton = document.querySelector('#registration-form button[type="submit"]');
 					try {
+						// disable button to prevent duplicate submits
+						if (submitButton) submitButton.disabled = true;
+
 						const response = await fetch('/register', {
 							method: 'POST',
+							credentials: 'same-origin',
 							headers: {
 								'Content-Type': 'application/json',
 							},
 							body: JSON.stringify(Object.fromEntries(formData)),
 						});
-						const result = await response.json();
+
+						let result = null;
+						try {
+							result = await response.json();
+						} catch (e) {
+							console.error('Failed to parse /register JSON response', e);
+						}
+
+						console.log('Register response:', result);
 
 						if (response.ok) {
-
 							// Check if the server response indicates success
-							if (result.success) {
+							if (result && result.success) {
 								// Show SweetAlert2 success message
 								Swal.fire({
 									icon: 'success',
 									title: 'Success!',
-									text: 'Your registration was successful!',
+									text: result.message || 'Your registration was successful!',
 								}).then(() => {
-									// Redirect to the home page
-									window.location.href = '/otp';
+									// Redirect to the OTP page (use redirectUrl when provided)
+									const redirect = result.redirectUrl || '/otp';
+									window.location.href = redirect;
 								});
 							} else {
 								// Display an error message to the user
 								Swal.fire({
 									icon: 'error',
 									title: 'Error!',
-									text: result.message,
+									text: (result && result.message) || 'Registration failed',
 								});
 							}
 						} else {
-							// Handle error
-							console.error(result);
-							// Display an error message to the user
+							// Handle non-OK HTTP responses
+							console.error('Registration request failed:', response.status, result);
+							Swal.fire({ icon: 'error', title: 'Error!', text: (result && result.message) || 'Registration failed' });
+							if (submitButton) submitButton.disabled = false;
 						}
 					} catch (error) {
 						console.error(error);
 						// Handle fetch error
+						const submitButton = document.querySelector('#registration-form button[type="submit"]');
+						if (submitButton) submitButton.disabled = false;
 					}
 				}
 			}

@@ -45,10 +45,9 @@
 
                                             <tr class="table_row">
                                                 <td class="column-1">
-                                                    <div class="how-itemcart1">
-                                                            <img src="<%= (function() { let productImg = '/car/userAssets/images/icons/logo-01.png'; const prod = data && data.productId; if (prod && prod.productImage) { let imgData = prod.productImage; if (typeof imgData === 'string') { try { imgData = JSON.parse(imgData); } catch (e) { imgData = prod.productImage; } } if (Array.isArray(imgData) && imgData.length > 0) productImg = imgData[0]; else if (typeof imgData === 'string' && imgData.trim() !== '') productImg = imgData; if (productImg && !productImg.startsWith('http') && !productImg.startsWith('/')) productImg = '/car/productImages/' + productImg; } return productImg; })() %>"
-                                                            alt="Product Image">
-                                                    </div>
+                                                        <div class="how-itemcart1">
+                                                            <img src="<%= data.displayImage %>" alt="Product Image">
+                                                        </div>
 
                                                 </td>
                                                 <td class="column-2">

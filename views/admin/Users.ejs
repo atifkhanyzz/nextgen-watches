@@ -63,6 +63,12 @@
                                                                     <% } %>
                                                         </td>
 
+                                                        <td>
+                                                            <form action="/admin/removeUser/<%= users[i]._id %>" method="post" onsubmit="return confirm('Are you sure you want to remove this user? This action can be undone by admin.');">
+                                                                <button type="submit" class="btn btn-danger">Remove</button>
+                                                            </form>
+                                                        </td>
+
                                                     </tr>
                                                     <% } %>
 

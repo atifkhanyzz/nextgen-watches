@@ -7,6 +7,32 @@ const Admin = require('../models/adminModel');
 const { Op } = require('sequelize');
 const path = require("path")
 
+function normalizeProductImages(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'string') {
+        try {
+            let parsed = JSON.parse(value);
+            if (typeof parsed === 'string') {
+                try { parsed = JSON.parse(parsed); } catch (e) { /* keep parsed */ }
+            }
+            if (Array.isArray(parsed)) return parsed.filter(Boolean);
+            return parsed ? [parsed] : [];
+        } catch (e) {
+            return value.trim() ? [value] : [];
+        }
+    }
+    return [];
+}
+
+function getDisplayImage(productImage) {
+    const images = normalizeProductImages(productImage);
+    const img = images.find(x => typeof x === 'string' && x.trim() !== '');
+    if (!img) return '/car/userAssets/images/icons/logo-01.png';
+    if (img.startsWith && (img.startsWith('http') || img.startsWith('/'))) return img;
+    return '/car/productImages/' + img;
+}
+
 
 module.exports = {
     addToCart: async (req, res, next) => {
@@ -116,7 +142,12 @@ module.exports = {
                             const p = prodMap[item.productId] || null;
                             if (p) total += item.quantity * p.discountedPrice;
                             const productObj = p ? { ...p, _id: p.id } : null;
-                            return { ...item, productId: productObj };
+                            // normalize productImage and compute displayImage for template
+                            if (productObj) {
+                                productObj.productImage = normalizeProductImages(productObj.productImage);
+                                productObj.displayImage = getDisplayImage(productObj.productImage);
+                            }
+                            return { ...item, productId: productObj, displayImage: productObj ? productObj.displayImage : '/car/userAssets/images/icons/logo-01.png' };
                         });
 
                         return res.render('cart', { user: req.session.userId, userId, cart: enriched, total });

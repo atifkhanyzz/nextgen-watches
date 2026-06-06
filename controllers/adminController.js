@@ -147,9 +147,12 @@ module.exports = {
 
             let users;
 
+            const whereBase = { [Op.or]: [{ isDeleted: false }, { isDeleted: null }] };
+
             if (search) {
                 users = await User._Model.findAll({
                     where: {
+                        ...whereBase,
                         [Op.or]: [
                             { firstName: { [Op.like]: `%${search}%` } },
                             { lastName: { [Op.like]: `%${search}%` } },
@@ -158,12 +161,14 @@ module.exports = {
                         ]
                     }
                 });
+                users = users.map(r => r.get ? r.get({ plain: true }) : r);
+                users = users.map(u => { u._id = u.id; return u; });
             } else {
-                const rows = await User._Model.findAll({ offset: skip, limit: pageSize });
-                users = rows.map(r => r.get({ plain: true }));
+                const rows = await User._Model.findAll({ where: whereBase, offset: skip, limit: pageSize });
+                users = rows.map(r => { const p = r.get({ plain: true }); p._id = p.id; return p; });
             }
 
-            const totalUsers = await User._Model.count();
+            const totalUsers = await User._Model.count({ where: whereBase });
             const totalPages = Math.ceil(totalUsers / pageSize);
 
             res.render('Users', { users, currentPage: page, totalPages });
@@ -181,6 +186,28 @@ module.exports = {
                 await userRow.update({ isBlocked: !user.isBlocked });
             }
             res.redirect('/admin/Users');
+        } catch (error) {
+            next(error);
+        }
+    },
+
+    removeUser: async (req, res, next) => {
+        try {
+            const id = req.params.id || req.body.id;
+            if (!id) return res.redirect('/admin/Users');
+
+            const userRow = await User._Model.findByPk(id);
+            if (!userRow) return res.redirect('/admin/Users');
+
+            const user = userRow.get({ plain: true });
+
+            // Prevent deleting if user already deleted
+            if (user.isDeleted) return res.redirect('/admin/Users');
+
+            // Soft-delete: mark isDeleted and deletedAt
+            await userRow.update({ isDeleted: true, deletedAt: new Date() });
+
+            return res.redirect('/admin/Users');
         } catch (error) {
             next(error);
         }
