@@ -19,7 +19,13 @@ const securePassword = async (password) => {
 
 // Normalizer for boolean-like values stored in DB
 function isTrueValue(value) {
-    return value === true || value === 1 || value === '1' || value === 'true';
+    if (value === true) return true;
+    if (typeof value === 'number') return value === 1;
+    if (typeof value === 'string') {
+        const v = value.trim().toLowerCase();
+        return v === '1' || v === 'true' || v === 'yes' || v === 'y';
+    }
+    return false;
 }
 
 const otpSent = async (email, otp) => {
@@ -319,10 +325,12 @@ module.exports = {
             console.log('Raw isVerified:', existingUser ? existingUser.isVerified : null);
 
             const existingUserVerified = existingUser ? isTrueValue(existingUser.isVerified) : false;
-            console.log('Normalized existingUserVerified:', existingUserVerified);
+            const existingUserDeleted = existingUser ? isTrueValue(existingUser.isDeleted) : false;
+            console.log('Normalized existingUserVerified:', existingUserVerified, 'existingUserDeleted:', existingUserDeleted);
 
-            if (existingUser && existingUserVerified) {
-                console.log('Existing verified user found, blocking signup for', email);
+            // Block signup only if an existing account is verified and NOT soft-deleted.
+            if (existingUser && existingUserVerified && !existingUserDeleted) {
+                console.log('Existing verified (active) user found, blocking signup for', email);
                 return res.json({ success: false, message: 'User already exists' });
             }
 
